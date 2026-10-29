@@ -30,6 +30,54 @@ dsh plugin --profile desktop add /path/to/dsh-fuulea-import
 
 > 用 `github:` 安装时，每次执行该命令都会拉到最新提交；更新后需要重启 DeepSeek Harness 生效。
 
+## 版本与更新
+
+页面右上角显示当前版本（如 `v1.1.0`）。**只要本机是按 `github:` 源安装的**，就有两条更新途径：
+
+| 方式 | 操作 |
+| --- | --- |
+| 页面内一键更新（推荐） | 有新版本时徽标变红并带跳动红点，点它展开面板 →「立即更新」 |
+| 命令行 | `dsh plugin --profile <你的 profile> add github:100759/dsh-fuulea-import` |
+
+- Host 每 10 分钟最多查一次 GitHub 上的最新版本（`GET /update-check`）；页面打开时查一次，
+  面板上的「检查更新」可强制立即查。
+- 有新版本时，版本面板会**自动展开**并显示「有新版本可用：vX」；点「立即更新」会在本机 profile 里执行
+  `pnpm add github:100759/dsh-fuulea-import`（即重新拉到最新提交）。
+- 更新完成后提示**重启 DeepSeek Harness**；重启前版本面板会显示「已更新到 vX，重启 Harness 后生效」，
+  红点同时消失（不会因为还没重启就一直提示有新版本）。
+- 版本比较用「磁盘上已装的版本」而不是「正在运行的版本」，所以更新成功后红点立刻消失。
+
+无法一键更新的情况，面板会说明原因：
+
+| 情况 | 面板提示 |
+| --- | --- |
+| `link:` 本地目录安装 | 更新请直接改源码目录，或改从 GitHub 安装 |
+| npm / 其它来源 | 给出可复制的 `dsh plugin --profile <p> add github:...` 命令 |
+| 内网无法访问 GitHub | 显示「检查更新失败：…」，不影响导入成绩等主流程 |
+
+关闭联网检查（内网或合规环境）—— 在 `cordis.patch.yml` 的 config 里加：
+
+```yaml
+- insert:
+    - id: fuulea-import
+      name: 'dsh-fuulea-import'
+      config:
+        checkUpdates: false      # 不发起任何版本检查请求
+        repository: owner/repo   # 换仓库地址（默认 100759/dsh-fuulea-import）
+```
+
+### 发版流程（维护者）
+
+别人能不能「更新到你的最新版」，取决于 **`package.json` 的 `version` 有没有变大**：
+
+1. 改代码，把 `package.json` 的 `version` 提高（如 `1.1.0` → `1.2.0`）。
+2. `CHANGELOG.md` 补一段该版本的说明。
+3. `git push` 到 `main`（并建议打 tag：`git tag v1.2.0 && git push origin v1.2.0`）。
+
+推上去之后，其他人下次打开工作台（或点「检查更新」）就会看到红点，点「立即更新」即可。
+
+> 只推代码不升 `version`，别人的红点不会亮 —— 版本号是唯一的比较依据。
+
 ### 依赖
 
 - Node ≥ 22.19（插件本身）；`python3` + `openpyxl`（填充与预检）。
@@ -43,8 +91,9 @@ python3 -m pip install xlrd            # 可选：要直接读 .xls 时
 ### 自测
 
 ```bash
-node scripts/client-smoke.mjs   # Client 半边渲染/交互冒烟（不联网）
-node scripts/test-ai.mjs        # AI 映射输出约束（不联网）
+node scripts/client-smoke.mjs    # Client 半边渲染/交互冒烟，含版本徽标与更新面板（不联网）
+node scripts/test-ai.mjs         # AI 映射输出约束（不联网）
+node scripts/test-updater.mjs    # 版本比较、安装来源识别、/update-check 与 /update 的拦截分支（不联网、不跑 pnpm）
 ```
 
 ## 使用
@@ -175,6 +224,8 @@ node scripts/test-ai.mjs        # AI 映射输出约束（不联网）
 | `outputDir` | `~/.fuulea-import/output` | 填好的模板输出目录 |
 | `pythonPath` | `python3` | python3 可执行文件 |
 | `requestTimeoutMs` | `90000` | 单次请求超时 |
+| `repository` | `100759/dsh-fuulea-import` | 版本检查与一键更新用的 GitHub 仓库（`owner/repo`） |
+| `checkUpdates` | `true` | 是否联网检查新版本；`false` 时完全不发请求，也不允许一键更新 |
 
 ## 数据接口（只读 + 一个写接口）
 
@@ -188,6 +239,22 @@ node scripts/test-ai.mjs        # AI 映射输出约束（不联网）
 
 平台 `/v2` 接口需要 `Authorization: jwt <token>`、`uuid`、`fl-sec-sign` 三个请求头，签名算法是
 murmurhash3_x64_128（见 `lib/murmur3.js`、`lib/api.js`）。
+
+## 本机接口（`/fuulea-import/api/*`）
+
+工作台页面调用的是本机 Host 路由，不是平台接口：
+
+| 接口 | 用途 |
+| --- | --- |
+| `GET defaults` | 已绑定学校、默认学校、输出目录、当前版本 |
+| `POST bind` / `POST unbind` | 绑定 / 解绑学校（账号只写本机） |
+| `POST tasks` | 列出可导入的任务 |
+| `POST template` / `POST parse` / `POST batch-scan` / `POST analyze` | 下模板、解析源表、批量体检、题号映射分析 |
+| `POST fill` / `POST precheck` | 填充模板、预检 |
+| `POST import` / `POST receipt` | 导入、核对回执 |
+| `GET update-check` | 检查 GitHub 上是否有新版本（`?force=1` 跳过缓存） |
+| `POST update` | 从 GitHub 重新安装到本机 profile（仅 `github:` 源安装可用） |
+| `POST open` | 用系统默认应用打开输出目录里的文件 |
 
 ## 安全
 
@@ -204,6 +271,8 @@ murmurhash3_x64_128（见 `lib/murmur3.js`、`lib/api.js`）。
    绑定只存在各自机器上，同事之间不共享账号。
 4. 每个账号只能操作自己权限范围内的任务；`defaultSchool` 只是首次默认值，可在
    `cordis.patch.yml` 的 config 里改成自己学校的子域名。
+5. 之后**不用再记安装命令**：维护者推了新版本后，页面右上角版本徽标会变红，
+   点它 →「立即更新」→ 重启 Harness 即可。详见「版本与更新」。
 
 ## 许可证
 

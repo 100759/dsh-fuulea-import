@@ -1,6 +1,6 @@
 {
   "name": "dsh-fuulea-import",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "type": "module",
   "description": "辅立码课导入成绩工作台：学校绑定/切换、免重复登录，拖入成绩文件（表格或压缩包）自动填充全通教育上传模板，预检后一键导入并核对平台回执。",
   "keywords": [

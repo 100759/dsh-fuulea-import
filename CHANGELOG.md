@@ -1,5 +1,25 @@
 # 更新日志
 
+## 1.1.0
+
+**新增版本检查与页面内一键更新** —— 维护者推新版本后，其他人不必再记安装命令。
+
+- 页面右上角版本徽标变为可点击：GitHub 上有新版本时变红并带跳动红点，点击展开版本面板。
+- 版本面板显示「当前 / 最新 / 安装方式 / 检查时间」，有新版本时**自动展开**，
+  提供「检查更新」「立即更新」「查看更新说明」。
+- 「立即更新」在本机 profile 里执行 `pnpm add github:100759/dsh-fuulea-import`，
+  更新后提示重启 DeepSeek Harness；重启前显示「已更新到 vX，重启 Harness 后生效」。
+- 版本比较对象是**磁盘上已装的版本**，因此更新成功后红点立刻消失，不会一直催。
+- 非 GitHub 安装会明确说明并给出可复制的命令：`link:` 本地目录安装提示直接改源码；
+  npm 等来源给出 `dsh plugin --profile <p> add github:...`；内网检查失败只提示、不影响主流程。
+- 新增配置 `repository`（默认 `100759/dsh-fuulea-import`）与 `checkUpdates`（默认 `true`，
+  设 `false` 完全不联网检查）。
+- 新增 Host 路由 `GET update-check`、`POST update`；`POST update` 单独放宽到 240 秒超时
+  （其余接口仍是 `requestTimeoutMs`）。
+- 新增 `lib/updater.js`（版本比较、安装来源识别、GitHub 版本读取、pnpm 更新执行）。
+- 自测新增 `scripts/test-updater.mjs`（38 项断言，不联网、不跑 pnpm）；
+  `scripts/client-smoke.mjs` 增至 65 项，其中 14 项是版本徽标与更新面板断言。
+
 ## 1.0.0
 
 首个公开版本。

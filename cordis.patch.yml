@@ -15,6 +15,8 @@
 #   outputDir        填好的模板输出目录，默认 <用户主目录>/.fuulea-import/output
 #   pythonPath       python3 可执行文件路径，默认 python3
 #   requestTimeoutMs 单次请求超时，默认 90000
+#   repository       版本检查与一键更新的 GitHub 仓库，默认 100759/dsh-fuulea-import
+#   checkUpdates     是否联网检查新版本，默认 true；内网环境设 false 可完全关闭
 - insert:
     - id: fuulea-import
       name: 'dsh-fuulea-import'

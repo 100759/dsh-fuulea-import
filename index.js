@@ -5,7 +5,8 @@
 //   2. 学校「绑定」：账号密码只在本机保存一次，之后打开页面直接登录（可切换多所学校）；
 //   3. 登录学校站点，拉取「已发布的考试×学科任务」，下载全通教育「班级对照表」模板；
 //   4. 解析源成绩文件、调用 Python 填充模板 + 传前预检；
-//   5. 导入成绩（source=qt，后台异步），核对 inbox 回执。
+//   5. 导入成绩（source=qt，后台异步），核对 inbox 回执；
+//   6. 版本检查与一键更新：比对 GitHub 上 package.json 的版本，按 GitHub 源安装时可从页面直接升级。
 //
 // 范围（第一版）：只做「平常考试」——任务已在平台发布；不做 绑卷/发布/阅卷收尾。
 import fs from 'node:fs'
@@ -20,13 +21,23 @@ import { parseXlsx, parseCsv, guessSubjectFromName, SUBJECT_ORDER } from './lib/
 import { parseTemplate } from './lib/template.js'
 import { ruleAnalyze, buildFillPlan, normalizeQno } from './lib/qmap.js'
 import { aiSuggestMappings } from './lib/ai.js'
+import {
+  DEFAULT_REPO,
+  createVersionChecker,
+  detectInstallSource,
+  readLocalVersion,
+  resolveProfileDir,
+  runGithubUpdate,
+} from './lib/updater.js'
 
 export const name = 'fuulea-import'
 export const inject = ['webServer', 'tools', 'llm', 'agentDefaultModel']
 
 const PACKAGE_NAME = 'dsh-fuulea-import'
+/** 插件自身目录（package.json 所在目录），用于读取当前版本。 */
 const PACKAGE_DIR = path.dirname(fileURLToPath(import.meta.url))
-const VERSION = readLocalVersion(PACKAGE_DIR) || '1.0.0'
+/** 当前版本以安装的 package.json 为准；读不到时用兜底常量。 */
+const VERSION = readLocalVersion(PACKAGE_DIR) || '1.1.0'
 const ROUTE_PREFIX = '/fuulea-import/api'
 const MAX_CACHED_CLIENTS = 24
 
@@ -37,6 +48,10 @@ const DEFAULT_CONFIG = {
   outputDir: '',
   pythonPath: 'python3',
   requestTimeoutMs: 90_000,
+  // 发布与更新：repository 是本插件在 GitHub 上的仓库（owner/repo），
+  // checkUpdates=false 可完全关闭联网检查（内网环境用）。
+  repository: DEFAULT_REPO,
+  checkUpdates: true,
 }
 
 export function apply(ctx, rawConfig) {
@@ -51,12 +66,27 @@ export function apply(ctx, rawConfig) {
     config.reportBindingsFile || path.join(os.homedir(), '.fuulea-report', 'bindings.json'),
   )
 
+  const versionChecker = createVersionChecker({
+    repo: config.repository || DEFAULT_REPO,
+    currentVersion: () => VERSION,
+    // 磁盘上已装版本（更新后立刻变化，而当前的 VERSION 要重启才会变）。
+    installedVersion: () => {
+      const profileDir = resolveProfileDir(PACKAGE_DIR, PACKAGE_NAME)
+      const installedPkg = profileDir ? path.join(profileDir, 'node_modules', PACKAGE_NAME) : ''
+      return (installedPkg && readLocalVersion(installedPkg)) || VERSION
+    },
+    installSource: () => detectInstallSource(resolveProfileDir(PACKAGE_DIR, PACKAGE_NAME), PACKAGE_NAME),
+    enabled: config.checkUpdates !== false,
+  })
+
   const state = {
     ctx,
     config,
     bindings,
     reportBindings,
     clients,
+    versionChecker,
+    updating: null,
     outputRoot: () => {
       const configured = config.outputDir || process.env.FUULEA_IMPORT_DIR || ''
       if (configured) return path.resolve(configured)
@@ -74,7 +104,7 @@ export function apply(ctx, rawConfig) {
   ctx.effect(() => ctx.tools.register(importTool(state)))
 
   ctx.effect(() => () => {
-    // 无需要清理的子进程（Python 调用都是短任务）
+    // 无需要清理的子进程（Python 调用都是短任务；更新用的 pnpm 子进程会自行退出）
   })
 }
 
@@ -99,6 +129,68 @@ const ROUTES = {
         bindings: list,
         lastSchool,
       },
+    }
+  },
+
+  // GET update-check：检查 GitHub 上是否有新版本（force=1 跳过缓存，用于点「检查更新」）。
+  'GET update-check': async (state, body, url) => {
+    const force = Boolean(url && url.searchParams.get('force'))
+    const info = await state.versionChecker.check(force)
+    return {
+      ok: true,
+      version: info.installed || VERSION,
+      runningVersion: VERSION,
+      repo: info.repo,
+      repoUrl: info.repoUrl,
+      latest: info.latest,
+      updateAvailable: info.updateAvailable,
+      restartPending: Boolean(info.restartPending),
+      source: info.source,
+      spec: info.spec,
+      disabled: info.disabled,
+      checkedAt: info.checkedAt,
+      error: info.error,
+      updating: Boolean(state.updating),
+    }
+  },
+
+  // POST update：从 GitHub 重新安装到本机 profile（仅 GitHub 源安装可用）。
+  //   返回后需要重启 DeepSeek Harness，新版本代码才会生效。
+  'POST update': async (state) => {
+    const info = await state.versionChecker.check(true)
+    if (info.disabled) throw new Error('插件配置里已关闭联网检查（checkUpdates=false），无法自动更新')
+    if (info.source === 'link') {
+      throw new Error('本机是以本地目录方式安装的（link），更新请直接修改源码目录，或改从 GitHub 安装')
+    }
+    if (info.source !== 'github') {
+      throw new Error(
+        '本机不是从 GitHub 安装的，无法一键更新。请手动执行：dsh plugin --profile ' +
+          (process.env.DSH_PROFILE || '<profile>') +
+          ' add github:' +
+          info.repo,
+      )
+    }
+    if (state.updating) throw new Error('正在更新中，请稍候…')
+    const repo = info.repo || state.config.repository || DEFAULT_REPO
+    state.updating = runGithubUpdate({
+      profileDir: resolveProfileDir(PACKAGE_DIR, PACKAGE_NAME),
+      repo,
+      packageName: PACKAGE_NAME,
+    })
+    try {
+      const result = await state.updating
+      return {
+        ok: true,
+        from: result.from,
+        to: result.to,
+        latest: info.latest,
+        restartRequired: true,
+        message: `已更新到 ${result.to || info.latest}，重启 DeepSeek Harness 后生效`,
+      }
+    } finally {
+      state.updating = null
+      // 更新后重新检查一次，页面徽标不会继续显示红点。
+      state.versionChecker.check(true).catch(() => {})
     }
   },
 
@@ -520,7 +612,9 @@ async function handle(state, req, res) {
     const route = ROUTES[key]
     if (!route) return json(res, 404, { ok: false, error: `未知接口 ${key}` })
     const body = req.method === 'POST' ? await readJsonBody(req) : null
-    const payload = await withTimeout(route(state, body, url), state.config.requestTimeoutMs, '接口处理超时')
+    // 更新要走一次 pnpm 安装，给更长的超时；其余接口用统一超时。
+    const timeoutMs = key === 'POST update' ? 240_000 : state.config.requestTimeoutMs
+    const payload = await withTimeout(route(state, body, url), timeoutMs, '接口处理超时')
     return json(res, 200, payload)
   } catch (e) {
     return json(res, 400, { ok: false, error: e && e.message ? e.message : String(e) })
@@ -1426,15 +1520,6 @@ function safeName(s) {
 
 function srcBase(name) {
   return safeName(String(name || '').replace(/\.(xlsx|xls|csv|zip)$/i, '')).slice(0, 40) || '成绩'
-}
-
-function readLocalVersion(dir) {
-  try {
-    const pkg = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8'))
-    return pkg.version
-  } catch {
-    return ''
-  }
 }
 
 function json(res, status, payload) {

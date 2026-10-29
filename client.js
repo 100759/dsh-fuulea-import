@@ -41,7 +41,19 @@ window.__ModuleLoader__.load({
       '[data-platform="darwin"] .fli-header{padding-top:calc(28px + var(--dsh-frame-top-clearance,0px))}' +
       '.fli-title{margin:0;font-size:20px;font-weight:600;line-height:28px;letter-spacing:.01em}' +
       '.fli-subtitle{margin:2px 0 0;font-size:13px;line-height:20px;color:var(--dsw-alias-label-secondary)}' +
-      '.fli-version{display:inline-flex;align-items:center;height:22px;padding:0 9px;border:1px solid var(--dsw-alias-border-l1);border-radius:999px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-secondary);font:inherit;font-size:12px;line-height:20px;white-space:nowrap}' +
+      '.fli-version{position:relative;display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 9px;border:1px solid var(--dsw-alias-border-l1);border-radius:999px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-secondary);font:inherit;font-size:12px;line-height:20px;white-space:nowrap;cursor:pointer;transition:border-color .15s,color .15s}' +
+      '.fli-version:hover{border-color:var(--dsw-alias-border-l2);color:var(--dsw-alias-label-primary)}' +
+      '.fli-version[aria-expanded="true"]{border-color:var(--dsw-alias-brand-primary);color:var(--dsw-alias-label-primary)}' +
+      '.fli-version--new{border-color:var(--dsw-alias-state-error-primary);color:var(--dsw-alias-state-error-primary)}' +
+      '.fli-version-dot{flex:none;width:7px;height:7px;border-radius:50%;background:var(--dsw-alias-state-error-primary,#e5484d);box-shadow:0 0 0 0 rgba(229,72,77,.55);animation:fli-pulse 1.8s ease-out infinite}' +
+      '@keyframes fli-pulse{0%{box-shadow:0 0 0 0 rgba(229,72,77,.5)}70%{box-shadow:0 0 0 6px rgba(229,72,77,0)}100%{box-shadow:0 0 0 0 rgba(229,72,77,0)}}' +
+      '.fli-update{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;padding:12px 16px;margin:0 0 16px;border:1px solid var(--dsw-alias-border-l1);border-radius:12px;background:var(--dsw-alias-bg-layer-1);font-size:13px;line-height:20px}' +
+      '.fli-update--new{border-color:var(--dsw-alias-state-error-primary)}' +
+      '.fli-update-main{flex:1 1 320px;min-width:0}' +
+      '.fli-update-title{margin:0;display:flex;align-items:center;gap:7px;font-weight:600;color:var(--dsw-alias-label-primary)}' +
+      '.fli-update-meta{margin:2px 0 0;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary);overflow-wrap:anywhere}' +
+      '.fli-update-actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px}' +
+      '.fli-update code{font-family:var(--dsh-font-family-code,ui-monospace,SFMono-Regular,Menlo,monospace);font-size:11px;word-break:break-all}' +
       '.fli-toolbar{padding:16px 18px;margin-bottom:16px;border:1px solid var(--dsw-alias-border-l1);border-radius:16px;background:var(--dsw-alias-bg-layer-1)}' +
       '.fli-toolbar-row{display:flex;flex-wrap:wrap;align-items:flex-start;gap:10px 14px}' +
       '.fli-toolbar-row+.fli-toolbar-row{margin-top:12px}' +
@@ -76,6 +88,7 @@ window.__ModuleLoader__.load({
       '.fli-btn--danger{border-color:var(--dsw-alias-border-l2);background:transparent;color:var(--dsw-alias-state-error-primary)}' +
       '.fli-btn--danger:not(:disabled):hover{background:var(--dsw-alias-bg-layer-2)}' +
       '.fli-btn--small{height:28px;padding:0 12px;font-size:12px}' +
+      '.fli-btn--tiny{height:24px;padding:0 9px;font-size:12px;border-radius:7px}' +
       '.fli-linkbtn{padding:0;border:0;background:transparent;color:var(--dsw-alias-brand-primary);font:inherit;font-size:12px;line-height:20px;cursor:pointer;white-space:nowrap}' +
       '.fli-linkbtn:hover{text-decoration:underline}' +
       '.fli-linkbtn:disabled{opacity:.55;cursor:not-allowed;text-decoration:none}' +
@@ -186,7 +199,124 @@ window.__ModuleLoader__.load({
       return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0') + ':' + String(d.getSeconds()).padStart(2, '0')
     }
 
+    function fmtDateTime(iso) {
+      if (!iso) return '—'
+      const date = new Date(iso)
+      if (Number.isNaN(date.getTime())) return String(iso)
+      try {
+        return date.toLocaleString('zh-CN', {
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: false,
+        })
+      } catch {
+        return date.toISOString()
+      }
+    }
+
     // ---------------------------------------------------------------- 组件
+
+    /**
+     * 版本徽标：显示当前版本；GitHub 上有新版本时带一个红点（并轻微脉冲），
+     * 点击展开/收起版本面板。红点状态来自 Host 的 GET /update-check。
+     */
+    function VersionBadge(props) {
+      const info = props.info
+      const version = (info && info.current) || props.fallbackVersion || ''
+      const hasNew = Boolean(info && info.updateAvailable)
+      return h('button', {
+        type: 'button',
+        className: 'fli-version' + (hasNew ? ' fli-version--new' : ''),
+        'aria-expanded': props.open ? 'true' : 'false',
+        title: hasNew
+          ? '有新版本 ' + info.latest + '，点击查看更新'
+          : '当前版本 ' + (version || '未知') + '，点击查看版本信息',
+        onClick: props.onToggle,
+      },
+        hasNew ? h('span', { className: 'fli-version-dot', 'aria-hidden': 'true' }) : null,
+        h('span', null, 'v' + (version || '—')),
+        hasNew ? h('span', null, '· 可更新') : null,
+      )
+    }
+
+    /**
+     * 版本面板：有新版本时显示「立即更新」；更新成功后提示重启 Harness。
+     * Host 侧只在按 GitHub 源安装时才允许一键更新（本地 link 安装会给出说明）。
+     */
+    function UpdatePanel(props) {
+      const info = props.info
+      const status = props.status || {}
+      if (!info) return null
+      const hasNew = Boolean(info.updateAvailable)
+      const checkError = info.error || ''
+      const sourceText = {
+        github: 'GitHub 安装',
+        link: '本地目录安装',
+        git: 'Git 安装',
+        registry: 'npm 安装',
+        unknown: '安装方式未知',
+      }[info.source] || '安装方式未知'
+      const canUpdate = hasNew && info.source === 'github' && !status.busy
+      const restartPending = Boolean(info.restartPending)
+      const metaParts = []
+      if (info.current) metaParts.push('当前 ' + info.current)
+      if (info.latest) metaParts.push('最新 ' + info.latest)
+      metaParts.push(sourceText)
+      if (info.checkedAt) metaParts.push('检查于 ' + fmtDateTime(new Date(info.checkedAt).toISOString()))
+
+      return h('div', { className: 'fli-update' + (hasNew ? ' fli-update--new' : '') },
+        h('div', { className: 'fli-update-main' },
+          h('p', { className: 'fli-update-title' },
+            hasNew ? h('span', { className: 'fli-version-dot', 'aria-hidden': 'true' }) : null,
+            restartPending
+              ? '已更新到 v' + (info.current || '') + '，重启 Harness 后生效'
+              : hasNew
+                ? '有新版本可用：v' + info.latest
+                : '已是最新版本',
+          ),
+          h('p', { className: 'fli-update-meta' }, metaParts.join(' · ')),
+          restartPending
+            ? h('p', { className: 'fli-update-meta' },
+                '新版本已装好，正在运行的仍是 v' + (info.running || '旧版本') + '；重启 DeepSeek Harness 即切换。')
+            : null,
+          info.disabled
+            ? h('p', { className: 'fli-update-meta' }, '已在插件配置里关闭联网检查（checkUpdates=false）')
+            : null,
+          checkError ? h('p', { className: 'fli-update-meta' }, '检查更新失败：' + checkError) : null,
+          status.message ? h('p', { className: 'fli-update-meta' }, status.message) : null,
+        ),
+        h('div', { className: 'fli-update-actions' },
+          h('button', {
+            type: 'button',
+            className: 'fli-btn fli-btn--ghost fli-btn--tiny',
+            disabled: status.busy,
+            onClick: props.onCheck,
+          }, status.checking ? '检查中…' : '检查更新'),
+          hasNew
+            ? h('button', {
+                type: 'button',
+                className: 'fli-btn fli-btn--primary fli-btn--tiny',
+                disabled: !canUpdate,
+                title: info.source === 'github'
+                  ? '从 GitHub 重新安装最新版'
+                  : '当前不是 GitHub 安装，无法一键更新：请重新执行 dsh plugin add github:' + (info.repo || ''),
+                onClick: props.onUpdate,
+              }, status.busy ? '更新中…' : '立即更新')
+            : null,
+          info.repoUrl
+            ? h('a', {
+                className: 'fli-btn fli-btn--ghost fli-btn--tiny',
+                href: info.repoUrl + '#readme',
+                target: '_blank',
+                rel: 'noreferrer noopener',
+              }, '查看更新说明')
+            : null,
+        ),
+      )
+    }
 
     /** 题号展示：优先用源表/模板的原始表头（如一、四(1)），标准化题号不同时附在括号里。 */
     function rawLabel(analysis, side, qno) {
@@ -258,6 +388,11 @@ window.__ModuleLoader__.load({
       const [error, setError] = useState('')
       const [log, setLog] = useState([])
       const [receipts, setReceipts] = useState(null)
+      // 版本与更新：info 来自 Host 的 GET /update-check，status 是面板上的即时状态。
+      const [versionInfo, setVersionInfo] = useState(null)
+      const [versionOpen, setVersionOpen] = useState(false)
+      const [versionStatus, setVersionStatus] = useState({ checking: false, busy: false, message: '' })
+      const versionBusyRef = useRef(false)
       // 本次导入的提交时刻（UTC）。回执只认这之后产生的，避免把历史回执算成"失败"。
       const importSinceRef = useRef('')
 
@@ -272,6 +407,78 @@ window.__ModuleLoader__.load({
 
       const clearError = () => setError('')
 
+      // 版本检查：页面打开时查一次（Host 侧缓存 10 分钟），有新版本就在徽标上点红点。
+      async function loadVersion(force) {
+        try {
+          const payload = await api('GET', '/update-check' + (force ? '?force=1' : ''))
+          if (!mountedRef.current) return null
+          const info = {
+            current: payload.version || '',
+            running: payload.runningVersion || '',
+            latest: payload.latest || '',
+            updateAvailable: Boolean(payload.updateAvailable),
+            restartPending: Boolean(payload.restartPending),
+            source: payload.source || 'unknown',
+            spec: payload.spec || '',
+            repo: payload.repo || '',
+            repoUrl: payload.repoUrl || '',
+            disabled: Boolean(payload.disabled),
+            checkedAt: payload.checkedAt || 0,
+            error: payload.error || '',
+          }
+          setVersionInfo(info)
+          if (info.current) setVersion(info.current)
+          return info
+        } catch (err) {
+          if (!mountedRef.current) return null
+          return null
+        }
+      }
+
+      async function checkUpdates() {
+        if (versionBusyRef.current) return
+        versionBusyRef.current = true
+        setVersionStatus({ checking: true, busy: false, message: '' })
+        try {
+          await loadVersion(true)
+          if (mountedRef.current) setVersionStatus({ checking: false, busy: false, message: '' })
+        } finally {
+          versionBusyRef.current = false
+        }
+      }
+
+      async function runUpdate() {
+        if (versionBusyRef.current) return
+        versionBusyRef.current = true
+        setVersionStatus({ checking: false, busy: true, message: '正在从 GitHub 安装最新版，请稍候…' })
+        setError('')
+        try {
+          const payload = await api('POST', '/update', {})
+          if (!mountedRef.current) return
+          setVersionStatus({
+            checking: false,
+            busy: false,
+            message:
+              (payload && payload.message ? payload.message : '更新完成') +
+              (payload && payload.restartRequired ? '（请重启 DeepSeek Harness 让新版本生效）' : ''),
+          })
+          setNotice(
+            '插件已更新到 ' +
+              ((payload && (payload.to || payload.latest)) || '最新版') +
+              '：重启 DeepSeek Harness 后生效。重启前当前页面仍运行旧版本。',
+          )
+          pushLog('插件已更新到 ' + ((payload && (payload.to || payload.latest)) || '最新版'), 'ok')
+          await loadVersion(true)
+        } catch (err) {
+          if (!mountedRef.current) return
+          setVersionStatus({ checking: false, busy: false, message: '' })
+          setError('更新失败：' + messageOf(err))
+          pushLog('更新失败：' + messageOf(err), 'err')
+        } finally {
+          versionBusyRef.current = false
+        }
+      }
+
       useEffect(() => {
         mountedRef.current = true
         api('GET', '/defaults')
@@ -283,6 +490,8 @@ window.__ModuleLoader__.load({
             setSchool(s)
           })
           .catch((err) => { if (mountedRef.current) setError('加载配置失败：' + messageOf(err)) })
+        // 版本检查与页面加载并行，失败不影响主流程（内网环境常见）。
+        loadVersion(false)
         return () => { mountedRef.current = false }
       }, [])
 
@@ -673,9 +882,26 @@ window.__ModuleLoader__.load({
                 h('p', { className: 'fli-subtitle' }, '把成绩文件（表格或压缩包）拖进来，一键填充模板、预检并导入辅立码课'),
               ),
               h('div', {},
-                version ? h('span', { className: 'fli-version' }, 'v' + version) : null,
+                version || versionInfo
+                  ? h(VersionBadge, {
+                      info: versionInfo,
+                      fallbackVersion: version,
+                      open: versionOpen,
+                      onToggle: () => setVersionOpen((prev) => !prev),
+                    })
+                  : null,
               ),
             ),
+
+            // 版本面板：有新版本、或已装好待重启时这里出现提示与「立即更新」按钮。
+            versionOpen || (versionInfo && (versionInfo.updateAvailable || versionInfo.restartPending))
+              ? h(UpdatePanel, {
+                  info: versionInfo,
+                  status: versionStatus,
+                  onCheck: checkUpdates,
+                  onUpdate: runUpdate,
+                })
+              : null,
 
             // 工具栏：学校 + 任务
             h('div', { className: 'fli-toolbar' },

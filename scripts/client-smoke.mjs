@@ -133,10 +133,47 @@ const binding = {
   boundAt: '2026-10-20T02:00:00.000Z', lastUsedAt: '2026-10-24T02:00:00.000Z', hasPassword: true,
 }
 
-const calls = { defaults: 0, tasks: 0, parse: 0, analyze: 0, batch: 0, fill: 0, precheck: 0, import: 0, receipt: 0, bind: 0 }
+const calls = { defaults: 0, tasks: 0, parse: 0, analyze: 0, batch: 0, fill: 0, precheck: 0, import: 0, receipt: 0, bind: 0, updateCheck: 0, update: 0 }
+
+// 版本检查的模拟状态：初始有新版可更新；POST /update 之后变成「已装好、待重启」。
+const versionState = { latest: '1.1.0', installed: '1.0.0', updated: false }
 
 async function fakeFetch(url, init) {
   const pathname = String(url)
+  const method = String((init && init.method) || 'GET').toUpperCase()
+  // 注意顺序：/update-check 也包含 "/update"，必须先判断。
+  if (pathname.includes('/update-check')) {
+    calls.updateCheck++
+    return response({
+      ok: true,
+      version: versionState.installed,
+      runningVersion: '1.0.0',
+      repo: '100759/dsh-fuulea-import',
+      repoUrl: 'https://github.com/100759/dsh-fuulea-import',
+      latest: versionState.latest,
+      updateAvailable: versionState.installed !== versionState.latest,
+      restartPending: versionState.updated,
+      source: 'github',
+      spec: 'github:100759/dsh-fuulea-import',
+      disabled: false,
+      checkedAt: 1761700000000,
+      error: '',
+      updating: false,
+    })
+  }
+  if (pathname.includes('/update') && method === 'POST') {
+    calls.update++
+    versionState.installed = versionState.latest
+    versionState.updated = true
+    return response({
+      ok: true,
+      from: '1.0.0',
+      to: versionState.latest,
+      latest: versionState.latest,
+      restartRequired: true,
+      message: '已更新到 ' + versionState.latest + '，重启 DeepSeek Harness 后生效',
+    })
+  }
   if (pathname.includes('/defaults')) {
     calls.defaults++
     return response({
@@ -461,6 +498,35 @@ if (importBtn) {
   check('核对回执调用了 /receipt', calls.receipt >= 1, 'calls=' + calls.receipt)
   check('显示「本次导入成功」', textOf(tree).includes('本次导入成功'))
   check('不显示为失败', !textOf(tree).includes('被平台拒收'))
+}
+
+// ---------------------------------------------------------------- 版本与更新
+
+check('版本检查调用了 /update-check', calls.updateCheck >= 1, 'calls=' + calls.updateCheck)
+const versionBtn = findAll(tree, (i) => i.type === 'button' && String(i.props.className || '').includes('fli-version'))
+check('渲染出可点击的版本徽标', versionBtn.length === 1, '找到 ' + versionBtn.length)
+check('有新版本时徽标带 --new 样式', versionBtn.length === 1 && String(versionBtn[0].props.className).includes('fli-version--new'))
+check('有新版本时徽标出现红点', versionBtn.length === 1 && findAll(versionBtn[0], (i) => String(i.props.className || '').includes('fli-version-dot')).length === 1)
+check('徽标显示当前版本 v1.0.0', textOf(versionBtn[0]).includes('v1.0.0'))
+check('徽标提示可更新', textOf(versionBtn[0]).includes('可更新'))
+
+// 有新版本时版本面板默认展开（不需要先点徽标）
+check('自动展开版本面板', textOf(tree).includes('有新版本可用：v1.1.0'))
+check('面板显示安装来源', textOf(tree).includes('GitHub 安装'))
+check('面板有「立即更新」按钮', findButton(tree, '立即更新').length === 1)
+check('面板有「检查更新」按钮', findButton(tree, '检查更新').length === 1)
+
+// 点「立即更新」：调用 POST /update，并提示重启
+const updateBtn = findButton(tree, '立即更新')[0]
+if (updateBtn) {
+  check('立即更新按钮可用（GitHub 源安装）', updateBtn.props.disabled === false)
+  updateBtn.props.onClick()
+  await flush(20)
+  tree = renderNode(React.createElement(Page, {}), 'root')
+  await flush()
+  check('调用了 POST /update', calls.update === 1, 'calls=' + calls.update)
+  check('更新后提示重启 Harness', textOf(tree).includes('重启'))
+  check('更新后红点消失（restartPending）', textOf(tree).includes('已更新到 v1.1.0'))
 }
 
 console.log('\n' + (failures ? `✗ ${failures} 项失败` : '✓ 全部通过'))
