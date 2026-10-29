@@ -1,0 +1,17 @@
+# 依赖与产物
+node_modules/
+out/
+*.log
+
+# 本地数据：真实成绩表、填好的模板、本机凭据
+bindings.json
+*.credentials
+output/
+*.xlsx
+*.xls
+*.csv
+!scripts/fixtures/*.csv
+
+# 系统文件
+.DS_Store
+Thumbs.db

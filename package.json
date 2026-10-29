@@ -1,0 +1,58 @@
+{
+  "name": "dsh-fuulea-import",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "辅立码课导入成绩工作台：学校绑定/切换、免重复登录，拖入成绩文件（表格或压缩包）自动填充全通教育上传模板，预检后一键导入并核对平台回执。",
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "dsh-plugin",
+    "plugin",
+    "fuulea",
+    "import-scores",
+    "teaching-cloud"
+  ],
+  "license": "MIT",
+  "author": "付恒 (https://github.com/100759)",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/100759/dsh-fuulea-import.git"
+  },
+  "homepage": "https://github.com/100759/dsh-fuulea-import#readme",
+  "bugs": {
+    "url": "https://github.com/100759/dsh-fuulea-import/issues"
+  },
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./locale/*.json": "./locale/*.json",
+    "./package.json": "./package.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "lib/*.js",
+    "scripts/*.py",
+    "scripts/*.mjs",
+    "locale/*.json",
+    "icon.svg",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true
+    }
+  },
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  }
+}
